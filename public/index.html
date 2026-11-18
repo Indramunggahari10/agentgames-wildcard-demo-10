@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trap Decoder — re-derive a gatekeeper decision from raw task fields</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #f6f4ef; color: #1c1a17; }
+  main { max-width: 880px; margin: 0 auto; padding: 28px 20px 48px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  h2 { font-size: 1.15rem; margin: 28px 0 8px; }
+  p, li { line-height: 1.55; }
+  .sub { color: #5b564d; margin-top: 0; }
+  .scope { border: 1px solid #c9b458; background: #fff8db; border-radius: 8px; padding: 10px 14px; }
+  .scope ul { margin: 6px 0 0; padding-left: 20px; }
+  label { display: block; font-size: 0.85rem; font-weight: 600; margin: 10px 0 4px; }
+  label span { font-weight: 400; color: #5b564d; }
+  input[type="text"], textarea, select { width: 100%; box-sizing: border-box; font: 0.95rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 9px 11px; border: 1px solid #a8a29a; border-radius: 8px; background: #fff; }
+  textarea { min-height: 64px; resize: vertical; }
+  select { font-family: inherit; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chips button { font: inherit; font-size: 0.85rem; padding: 6px 10px; border-radius: 999px; border: 1px solid #a8a29a; background: #fff; cursor: pointer; }
+  .chips button:hover { background: #ece7dd; }
+  .decode { font: inherit; font-weight: 700; font-size: 1rem; padding: 10px 22px; border-radius: 8px; border: 1px solid #2e7d32; background: #2e7d32; color: #fff; cursor: pointer; margin-top: 16px; }
+  .decode:hover { background: #256b28; }
+  .card { border: 1px solid #d6d0c6; border-radius: 10px; background: #fff; padding: 14px 16px; margin-top: 12px; }
+  .card.approve { border-color: #2e7d32; box-shadow: 0 0 0 1px #2e7d32 inset; }
+  .card.reject { border-color: #c0392b; box-shadow: 0 0 0 1px #c0392b inset; }
+  .card h3 { margin: 0 0 6px; font-size: 1rem; }
+  .big { font-size: 1.25rem; font-weight: 700; }
+  .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: #e8e4dc; }
+  .badge.pass { background: #d9ecd9; color: #1e5c22; }
+  .badge.fail { background: #f3e2e2; color: #8a2a2a; }
+  .badge.match { background: #d9ecd9; color: #1e5c22; }
+  .badge.mismatch { background: #f3e2e2; color: #8a2a2a; }
+  .muted { color: #5b564d; }
+  .error { border: 1px solid #c0392b; background: #fdecea; border-radius: 8px; padding: 10px 14px; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; border-bottom: 1px solid #ddd6cc; padding: 8px 6px; vertical-align: top; }
+  tr.first-fail td { background: #fdecea; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+  footer { margin-top: 32px; font-size: 0.85rem; color: #5b564d; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Trap Decoder</h1>
+  <p class="sub">Re-derive a zkVerify Agent Games Proof Gatekeeper decision from raw task fields. Paste the fields, plus a claimed decision, and the tool re-evaluates the 7 documented trap checks in order, names the first failing check with per-check evidence, and verdicts whether the claimed decision matches.</p>
+
+  <div class="scope"><strong>Honest scope.</strong>
+    <ul>
+      <li><strong>No chain reads.</strong> Nothing is looked up on-chain: no proof, balance, or block height is fetched anywhere.</li>
+      <li><strong>No proof verification.</strong> Whether a proof is real, on-chain, or valid is never judged here.</li>
+      <li><strong>Reuse is only as complete as the pasted list.</strong> The reuse check compares proof_tx against the seen-list you paste — and nothing else. An empty list means reuse can only pass.</li>
+      <li><strong>Correctness is re-derivation from pasted fields only.</strong> Given these field values, this is the decision the documented checks produce. Nothing pasted is stored or sent anywhere except this page's own API.</li>
+    </ul>
+  </div>
+
+  <h2>1. Paste the task fields</h2>
+  <div class="chips" id="chips"></div>
+  <p class="muted" id="exampleNote"></p>
+  <form id="form">
+    <div class="row">
+      <div><label for="registered_vk">registered_vk <span>— hex, 0x optional</span></label><input id="registered_vk" type="text" autocomplete="off" spellcheck="false"></div>
+      <div><label for="proof_vk">proof_vk <span>— hex, 0x optional</span></label><input id="proof_vk" type="text" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <div class="row">
+      <div><label for="minimum">minimum <span>— decimal integer string</span></label><input id="minimum" type="text" autocomplete="off" spellcheck="false"></div>
+      <div><label for="public_balance">public_balance <span>— decimal integer string</span></label><input id="public_balance" type="text" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <div class="row">
+      <div><label for="expiry_block">expiry_block <span>— integer</span></label><input id="expiry_block" type="text" autocomplete="off" spellcheck="false"></div>
+      <div><label for="current_block">current_block <span>— integer</span></label><input id="current_block" type="text" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <div class="row">
+      <div><label for="recipient">recipient <span>— hex, 0x optional</span></label><input id="recipient" type="text" autocomplete="off" spellcheck="false"></div>
+      <div><label for="condition_recipient">condition_recipient <span>— hex, 0x optional</span></label><input id="condition_recipient" type="text" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <div class="row">
+      <div><label for="amount">amount <span>— decimal integer string</span></label><input id="amount" type="text" autocomplete="off" spellcheck="false"></div>
+      <div><label for="max_transfer">max_transfer <span>— decimal integer string</span></label><input id="max_transfer" type="text" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <label for="proof_tx">proof_tx <span>— hex, 0x optional</span></label>
+    <input id="proof_tx" type="text" autocomplete="off" spellcheck="false">
+    <label for="seen_proof_txs">Previously seen proof_txs <span>— optional, one per line (reuse is judged ONLY against this list)</span></label>
+    <textarea id="seen_proof_txs" autocomplete="off" spellcheck="false" placeholder="e.g. 0xaaaa…&#10;0xbbbb…"></textarea>
+    <div class="row">
+      <div><label for="claimed_decision">Claimed decision <span>— optional</span></label>
+        <select id="claimed_decision"><option value="">(none claimed)</option><option>APPROVE</option><option>REJECT</option></select></div>
+      <div><label for="claimed_reason">Claimed reason_code <span>— optional</span></label>
+        <select id="claimed_reason"><option value="">(none claimed)</option><option>VALID_CONDITION</option><option>VK_SUBSTITUTION</option><option>THRESHOLD_MISMATCH</option><option>PROOF_REUSED</option><option>EXPIRED_CONDITION</option><option>RECIPIENT_MISMATCH</option><option>AMOUNT_OVERFLOW</option></select></div>
+    </div>
+    <button class="decode" type="submit">Decode the decision</button>
+  </form>
+  <div id="error"></div>
+
+  <h2>2. Re-derived decision</h2>
+  <div class="card" id="derivedCard"><p class="muted">Fill in the fields (or pick an example) and decode.</p></div>
+
+  <h2>3. Verdict on the claimed decision</h2>
+  <div class="card" id="verdictCard"><p class="muted">No claimed decision yet.</p></div>
+
+  <h2>4. All six checks, in order</h2>
+  <table>
+    <thead><tr><th>#</th><th>Check</th><th>Pass?</th><th>Evidence</th></tr></thead>
+    <tbody id="checkRows"><tr><td colspan="4" class="muted">Waiting for input.</td></tr></tbody>
+  </table>
+  <p class="muted" id="orderNote"></p>
+
+  <h2>5. The rules</h2>
+  <div id="rules"><p class="muted">Loading…</p></div>
+
+  <footer>
+    Re-derivation only: no chain reads, no proof verification, reuse judged
+    only against the pasted seen-list. Source: this page's own
+    <a href="/api/rules">/api/rules</a> endpoint.
+  </footer>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
